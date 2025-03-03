@@ -24,8 +24,9 @@ public class SessionInterceptor implements HandlerInterceptor {
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
         String token = request.getHeader("authorization");
-        log.info("进行拦截处理 {}", token);
+
         if(token.isEmpty()) {
+            log.info("进行拦截处理 {}", token);
             return false;
         }
         Map<Object, Object> entries = redisTemplate.opsForHash().entries("login:token:" + token);
@@ -33,10 +34,10 @@ public class SessionInterceptor implements HandlerInterceptor {
         UserDTO userDTO = new UserDTO();
         BeanUtil.fillBeanWithMap(entries,userDTO,false);
 
-        if (entries == null) {
+        if (entries.isEmpty()) {
             return false;
         }
-        log.info("保存线程用户: {}", entries.toString());
+        log.info("保存线程用户: {}", entries);
         UserHolder.saveUser(userDTO);
         return true;
     }
