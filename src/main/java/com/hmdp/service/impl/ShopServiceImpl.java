@@ -53,14 +53,7 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
 
     @Override
     public Result updateShop(Shop shop) {
-        //先数据库，再缓存
-        shopMapper.updateById(shop);
-        redisTemplate.delete("cache:shop:" + shop.getId());
-        shop = shopMapper.selectById(shop.getId());
-        Map map = BeanUtil.beanToMap(shop);
-        redisTemplate.opsForHash().putAll("cache:shop:" + shop.getId(), map);
-        redisTemplate.expire("cache:shop:" + shop.getId(), 30L, TimeUnit.MINUTES);
-        log.info("新增店铺缓存 {}",shop);
+        cacheUtil.update("cache:shop:",shop.getId(),shop,Shop.class,this::getById,this::updateById);
         return Result.ok();
     }
 

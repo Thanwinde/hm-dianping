@@ -12,6 +12,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 import java.util.function.Function;
 @Component
 @Slf4j
@@ -69,19 +70,16 @@ public class CacheUtil {
         return r;
     }
 
-/*    @Override
-    public Result updateShop(Shop shop) {
-        //先数据库，再缓存
-        shopMapper.updateById(shop);
-        redisTemplate.delete("cache:shop:" + shop.getId());
-        shop = shopMapper.selectById(shop.getId());
-        Map map = BeanUtil.beanToMap(shop);
-        redisTemplate.opsForHash().putAll("cache:shop:" + shop.getId(), map);
-        redisTemplate.expire("cache:shop:" + shop.getId(), 30L, TimeUnit.MINUTES);
-        log.info("新增店铺缓存 {}",shop);
-        return Result.ok();
-    }*/
 
+    public <ID,R> void update(String keyPrefix, ID id, R content, Class<R> type, Function<ID, R> dbFallback,Consumer<R> dbUpdate){
+        dbUpdate.accept(content);
+        R r = dbFallback.apply(id);
+        String key = keyPrefix + id;
+        redisTemplate.delete(key);
+        String json = JSONUtil.toJsonStr(r);
+        redisTemplate.opsForValue().set(key,json,30L, TimeUnit.MINUTES);
+        log.info("新增缓存 {}",content);
+    }
     private <ID>boolean tryLock(ID id) {
         String lockKey = "lock:shop:" + id;
         Boolean success = redisTemplate.opsForValue().setIfAbsent(lockKey, "locked", 10, TimeUnit.SECONDS);
@@ -93,4 +91,5 @@ public class CacheUtil {
         // 解锁时，确保只有持有锁的线程才能释放锁
         redisTemplate.delete(lockKey);
     }
+
 }
