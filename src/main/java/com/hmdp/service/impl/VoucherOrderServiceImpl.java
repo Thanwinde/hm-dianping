@@ -9,6 +9,7 @@ import com.hmdp.service.ISeckillVoucherService;
 import com.hmdp.service.IVoucherOrderService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.utils.RedisIdGenerator;
+import com.hmdp.utils.SimpleRedisLock;
 import com.hmdp.utils.UserHolder;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.aop.framework.AopContext;
@@ -33,9 +34,12 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 
     @Resource
     private ISeckillVoucherService seckillVoucherService;
+
     @Autowired
     private RedisIdGenerator redisIdGenerator;
 
+    @Autowired
+    private SimpleRedisLock simpleRedisLock;
 
     @Override
 
@@ -53,11 +57,27 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 
         Long userId = UserHolder.getUser().getId();
 
-    synchronized (userId.toString().intern()) {
-        IVoucherOrderService proxy = (IVoucherOrderService) AopContext.currentProxy();
-        return proxy.getResult(voucherId);
-    }
+        String key = "VoucherOrder:" +userId;
+        boolean b = simpleRedisLock.tryLock(key, 10L);
+        if(!b){
+            log.info("redis分部锁拦截！");
+            return Result.fail("已经购买过！");
+        }
+        log.info("redis分部锁获得！");
+        try {
 
+            IVoucherOrderService proxy = (IVoucherOrderService) AopContext.currentProxy();
+            return proxy.getResult(voucherId);
+
+        } catch (IllegalStateException e) {
+
+            throw new RuntimeException(e);
+
+        } finally {
+            log.info("redis分部锁解锁！");
+            simpleRedisLock.unlock(key);
+
+        }
     }
 
     @Transactional
