@@ -9,6 +9,7 @@ import com.hmdp.mapper.VoucherOrderMapper;
 import com.hmdp.service.ISeckillVoucherService;
 import com.hmdp.service.IVoucherOrderService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.hmdp.utils.CacheUtil;
 import com.hmdp.utils.RedisIdGenerator;
 import com.hmdp.utils.SimpleRedisLock;
 import com.hmdp.utils.UserHolder;
@@ -17,11 +18,15 @@ import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.springframework.aop.framework.AopContext;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import javax.annotation.Resource;
 import java.time.LocalDateTime;
+import java.util.Collections;
 
 /**
  * <p>
@@ -47,7 +52,35 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     @Autowired
     private RedissonClient redissonClient;
 
+    @Autowired
+    private RedisTemplate<String,String> redisTemplate;
+
+    @Autowired
+    private CacheUtil cacheUtil;
+
+    static final DefaultRedisScript<Long> script;
+    static {
+        script = new DefaultRedisScript<>();
+        script.setLocation(new ClassPathResource("secKill.lua"));
+        script.setResultType(Long.class);
+    }
+
     @Override
+    public Result setSeckillVoucher(Long voucherId) {
+        //TODO 添加基于redis的优惠劵缓存
+                Long userId = UserHolder.getUser().getId();
+                Long sign = redisTemplate.execute(
+                script,
+                Collections.emptyList(),
+                voucherId.toString(),userId.toString());
+
+        if(sign != 0){
+            return Result.fail(sign == 1 ? "已抢光！" : "已经购买过！");
+        }
+        return Result.ok();
+    }
+
+    /*@Override
     public Result setSeckillVoucher(Long voucherId) {
         SeckillVoucher voucher = seckillVoucherService.getById(voucherId);
         if(voucher.getBeginTime().isAfter(LocalDateTime.now())){
@@ -85,7 +118,7 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
             //simpleRedisLock.unlock(key);
             lock.unlock();
         }
-    }
+    }*/
 
     @Transactional
     public Result getResult(Long voucherId) {
