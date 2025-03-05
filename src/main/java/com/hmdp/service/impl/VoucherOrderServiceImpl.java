@@ -1,6 +1,7 @@
 package com.hmdp.service.impl;
 
 import com.baomidou.mybatisplus.extension.conditions.query.QueryChainWrapper;
+import com.hmdp.config.RedissonConfig;
 import com.hmdp.dto.Result;
 import com.hmdp.entity.SeckillVoucher;
 import com.hmdp.entity.VoucherOrder;
@@ -12,6 +13,8 @@ import com.hmdp.utils.RedisIdGenerator;
 import com.hmdp.utils.SimpleRedisLock;
 import com.hmdp.utils.UserHolder;
 import lombok.extern.slf4j.Slf4j;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 import org.springframework.aop.framework.AopContext;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -41,8 +44,10 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     @Autowired
     private SimpleRedisLock simpleRedisLock;
 
-    @Override
+    @Autowired
+    private RedissonClient redissonClient;
 
+    @Override
     public Result setSeckillVoucher(Long voucherId) {
         SeckillVoucher voucher = seckillVoucherService.getById(voucherId);
         if(voucher.getBeginTime().isAfter(LocalDateTime.now())){
@@ -58,7 +63,9 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         Long userId = UserHolder.getUser().getId();
 
         String key = "VoucherOrder:" +userId;
-        boolean b = simpleRedisLock.tryLock(key, 10L);
+        //boolean b = simpleRedisLock.tryLock(key, 10L);
+        RLock lock = redissonClient.getLock(key);
+        boolean b = lock.tryLock();
         if(!b){
             log.info("redis分部锁拦截！");
             return Result.fail("已经购买过！");
@@ -75,8 +82,8 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 
         } finally {
             log.info("redis分部锁解锁！");
-            simpleRedisLock.unlock(key);
-
+            //simpleRedisLock.unlock(key);
+            lock.unlock();
         }
     }
 

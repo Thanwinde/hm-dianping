@@ -26,3 +26,6 @@ mybatis-plus:
 logging:
   level:
     com.hmdp: debug
+my:
+  redisson:
+    password: 123456
