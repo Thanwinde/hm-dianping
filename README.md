@@ -22,10 +22,10 @@
 
 > ```java
 > login(){
->   if( ! this.radio){
->     this.$message.error("请先确认阅读用户协议！");
->     return
->   }
+> if( ! this.radio){
+>  this.$message.error("请先确认阅读用户协议！");
+>  return
+> }
 > ```
 
 惊叹号去掉！
