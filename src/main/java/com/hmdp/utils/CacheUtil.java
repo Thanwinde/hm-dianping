@@ -4,6 +4,7 @@ import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
 import com.hmdp.dto.Result;
+import com.hmdp.entity.SeckillVoucher;
 import com.hmdp.entity.Shop;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,7 +20,6 @@ import java.util.function.Function;
 public class CacheUtil {
     @Autowired
     private RedisTemplate redisTemplate;
-
 
     public <R, ID> R queryWithMutex(String keyPrefix, ID id, Class<R> type, Function<ID, R> dbFallback) {
         R r;
@@ -41,7 +41,7 @@ public class CacheUtil {
 
             log.info("成功获取锁！");
 
-            if (tryLock(id)) {
+            if (tryLock(keyPrefix,id)) {
                 Thread.sleep(50);
                 return queryWithMutex(keyPrefix,id,type,dbFallback);
             }
@@ -65,7 +65,7 @@ public class CacheUtil {
 
         } finally {
             log.info("成功解锁！");
-            unlock(id);
+            unlock(keyPrefix,id);
         }
         return r;
     }
@@ -80,16 +80,18 @@ public class CacheUtil {
         redisTemplate.opsForValue().set(key,json,30L, TimeUnit.MINUTES);
         log.info("新增缓存 {}",content);
     }
-    private <ID>boolean tryLock(ID id) {
-        String lockKey = "lock:shop:" + id;
+    private <ID>boolean tryLock(String key,ID id) {
+        String lockKey = "lock:" + key + id;
         Boolean success = redisTemplate.opsForValue().setIfAbsent(lockKey, "locked", 10, TimeUnit.SECONDS);
         return success != null && success;  // 如果成功获取锁，返回 true
     }
 
-    private <ID>void unlock(ID id) {
-        String lockKey = "lock:shop:" + id;
+    private <ID>void unlock(String key,ID id) {
+        String lockKey = "lock:" + key + id;
         // 解锁时，确保只有持有锁的线程才能释放锁
         redisTemplate.delete(lockKey);
     }
+
+
 
 }
