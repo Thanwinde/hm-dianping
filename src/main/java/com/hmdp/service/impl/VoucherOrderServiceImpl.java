@@ -99,13 +99,35 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
                     handleSecKill(voucherOrder);
                     stringRedisTemplate.opsForStream().acknowledge("stream.orders","g1",mapRecord.getId());
                 } catch (Exception e) {
-                    throw new RuntimeException(e);
+                    log.error("订单异常:{}",e);
+                    handlePendingList();
                 }
 
             }
         }
     }
-
+    private void handlePendingList(){
+        while (true) {
+            try {
+                List<MapRecord<String,Object,Object>> list = stringRedisTemplate.opsForStream().read(
+                        Consumer.from("g1","c1"),
+                        StreamReadOptions.empty().count(1),
+                        StreamOffset.create("stream.orders", ReadOffset.from("0"))
+                );
+                if(list == null || list.isEmpty()){
+                    break;
+                }
+                MapRecord<String,Object,Object> mapRecord = list.get(0);
+                Map<Object,Object> val = mapRecord.getValue();
+                VoucherOrder voucherOrder = BeanUtil.fillBeanWithMap(val,new VoucherOrder(),false);
+                handleSecKill(voucherOrder);
+                stringRedisTemplate.opsForStream().acknowledge("stream.orders","g1",mapRecord.getId());
+            } catch (Exception e) {
+                log.error("订单异常:{}",e);
+                throw new RuntimeException(e);
+            }
+        }
+    }
     @Override
     public Result setSeckillVoucher(Long voucherId) {
         SeckillVoucher voucher = cacheUtil.queryWithMutex("secKill:info:" + voucherId,voucherId,SeckillVoucher.class,seckillVoucherService::getById);
