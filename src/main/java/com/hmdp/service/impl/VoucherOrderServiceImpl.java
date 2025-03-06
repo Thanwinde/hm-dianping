@@ -1,7 +1,5 @@
 package com.hmdp.service.impl;
 
-import com.baomidou.mybatisplus.extension.conditions.query.QueryChainWrapper;
-import com.hmdp.config.RedissonConfig;
 import com.hmdp.dto.Result;
 import com.hmdp.entity.SeckillVoucher;
 import com.hmdp.entity.VoucherOrder;
@@ -24,9 +22,11 @@ import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import javax.annotation.PostConstruct;
 import javax.annotation.Resource;
 import java.time.LocalDateTime;
 import java.util.Collections;
+import java.util.concurrent.*;
 
 /**
  * <p>
@@ -64,12 +64,39 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         script.setLocation(new ClassPathResource("secKill.lua"));
         script.setResultType(Long.class);
     }
+    private IVoucherOrderService proxy;
+    private BlockingQueue<VoucherOrder> orders = new ArrayBlockingQueue<>(1024*1024);
+    private final ExecutorService secKill_order_handler = Executors.newSingleThreadExecutor();
+    @PostConstruct
+    private void init(){
+        secKill_order_handler.submit(new VoucherOrderHandler());
+    }
+    private class VoucherOrderHandler implements Runnable {
+        @Override
+        public void run() {
+            while (true) {
+                try {
+                    VoucherOrder voucherOrder = orders.take();
+                    handleSecKill(voucherOrder);
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+
+            }
+        }
+    }
 
     @Override
     public Result setSeckillVoucher(Long voucherId) {
-        //TODO 添加基于redis的优惠劵缓存
-                Long userId = UserHolder.getUser().getId();
-                Long sign = redisTemplate.execute(
+        SeckillVoucher voucher = cacheUtil.queryWithMutex("secKill:info:" + voucherId,voucherId,SeckillVoucher.class,seckillVoucherService::getById);
+        if(voucher.getBeginTime().isAfter(LocalDateTime.now())){
+            return Result.fail("活动尚未开始!");
+        }
+        if(voucher.getEndTime().isBefore(LocalDateTime.now())){
+            return Result.fail("活动已经结束！");
+        }
+        Long userId = UserHolder.getUser().getId();
+        Long sign = redisTemplate.execute(
                 script,
                 Collections.emptyList(),
                 voucherId.toString(),userId.toString());
@@ -77,73 +104,28 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         if(sign != 0){
             return Result.fail(sign == 1 ? "已抢光！" : "已经购买过！");
         }
-        return Result.ok();
-    }
-
-    /*@Override
-    public Result setSeckillVoucher(Long voucherId) {
-        SeckillVoucher voucher = seckillVoucherService.getById(voucherId);
-        if(voucher.getBeginTime().isAfter(LocalDateTime.now())){
-            return Result.fail("活动尚未开始!");
-        }
-        if(voucher.getEndTime().isBefore(LocalDateTime.now())){
-            return Result.fail("活动已经结束！");
-        }
-        if(voucher.getStock() < 1){
-            return Result.fail("已抢光！");
-        }
-
-        Long userId = UserHolder.getUser().getId();
-
-        String key = "VoucherOrder:" +userId;
-        //boolean b = simpleRedisLock.tryLock(key, 10L);
-        RLock lock = redissonClient.getLock(key);
-        boolean b = lock.tryLock();
-        if(!b){
-            log.info("redis分部锁拦截！");
-            return Result.fail("已经购买过！");
-        }
-        log.info("redis分部锁获得！");
-        try {
-
-            IVoucherOrderService proxy = (IVoucherOrderService) AopContext.currentProxy();
-            return proxy.getResult(voucherId);
-
-        } catch (IllegalStateException e) {
-
-            throw new RuntimeException(e);
-
-        } finally {
-            log.info("redis分部锁解锁！");
-            //simpleRedisLock.unlock(key);
-            lock.unlock();
-        }
-    }*/
-
-    @Transactional
-    public Result getResult(Long voucherId) {
-
-        long userId = UserHolder.getUser().getId();
-        int cnt = query().eq("user_id", userId).eq("voucher_id", voucherId).count();
-        if(cnt > 0){
-            return Result.fail("已经购买过!");
-        }
-
-        boolean success = seckillVoucherService
-                .update().setSql("stock = stock - 1")
-                .eq("voucher_id", voucherId)
-                .gt("stock",0)
-                .update();
-        if(!success){
-            return Result.fail("已抢光！");
-        }
         long orderId = redisIdGenerator.nextId("order");
-
         VoucherOrder voucherOrder = new VoucherOrder();
         voucherOrder.setId(orderId);
         voucherOrder.setVoucherId(voucherId);
         voucherOrder.setUserId(userId);
-        save(voucherOrder);
+        proxy = (IVoucherOrderService) AopContext.currentProxy();
+
+        orders.add(voucherOrder);
+
         return Result.ok(orderId);
+    }
+    public void handleSecKill(VoucherOrder voucherOrder){
+        RLock lock = redissonClient.getLock("lock:order:" + voucherOrder.getUserId());
+        boolean locked = lock.tryLock();
+        if(!locked){
+            return;
+        }
+        proxy.submitOrder(voucherOrder);
+        lock.unlock();
+    }
+    @Transactional
+    public void submitOrder(VoucherOrder voucherOrder){
+        save(voucherOrder);
     }
 }

@@ -37,14 +37,5 @@ public class SimpleRedisLock {
         long threadId = Thread.currentThread().getId();
         redisTemplate.execute(script, Collections.singletonList(key),uuid + threadId);
     }
-/*    public void unlock(String name) {
-        String key = "lock:" + name;
-        long threadId = Thread.currentThread().getId();
-        String id = (String) redisTemplate.opsForValue().get(key);
-        if (id == uuid + threadId) {
-            redisTemplate.delete(key);
-        }
-
-    }*/
 
 }
